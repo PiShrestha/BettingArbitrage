@@ -1,0 +1,55 @@
+# Node dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+.out/
+.tmp/
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Env files (keep an example: .env.example)
+.env
+.env.*
+!.env.example
+
+# Coverage / test artifacts
+coverage/
+.junit/
+.tap/
+reports/
+
+# Tooling / framework caches
+.next/
+.nuxt/
+.vercel/
+.turbo/
+.cache/
+storybook-static/
+.cypress-cache/
+
+# Package managers (other than the one you use)
+yarn.lock
+pnpm-lock.yaml
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Misc
+*.local
+*.retry
