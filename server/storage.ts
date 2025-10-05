@@ -1,4 +1,10 @@
-import { User, InsertUser, Opportunity, BettingSite, InsertBettingSite } from "@shared/schema";
+import {
+  User,
+  InsertUser,
+  Opportunity,
+  BettingSite,
+  InsertBettingSite,
+} from "@shared/schema";
 import session from "express-session";
 import createMemoryStore from "memorystore";
 const MemoryStore = createMemoryStore(session);
@@ -15,7 +21,9 @@ export interface IStorage {
 
   // Opportunities operations
   getOpportunities(): Promise<Opportunity[]>;
-  createOpportunity(opportunity: Omit<Opportunity, "id" | "createdAt">): Promise<Opportunity>;
+  createOpportunity(
+    opportunity: Omit<Opportunity, "id" | "createdAt">
+  ): Promise<Opportunity>;
 
   // Session store
   sessionStore: session.Store;
@@ -45,12 +53,12 @@ export class MemStorage implements IStorage {
     this.bettingSites.set(1, {
       id: 1,
       name: "Bet365",
-      url: "https://bet365.com"
+      url: "https://bet365.com",
     });
     this.bettingSites.set(2, {
       id: 2,
       name: "Betway",
-      url: "https://betway.com"
+      url: "https://betway.com",
     });
   }
 
@@ -60,13 +68,19 @@ export class MemStorage implements IStorage {
 
   async getUserByUsername(username: string): Promise<User | undefined> {
     return Array.from(this.users.values()).find(
-      (user) => user.username === username,
+      (user) => user.username === username
     );
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = this.currentUserId++;
-    const user = { ...insertUser, id };
+    const user: User = {
+      id,
+      username: insertUser.username,
+      password: insertUser.password,
+      email: insertUser.email,
+      notificationsEnabled: insertUser.notificationsEnabled ?? true,
+    };
     this.users.set(id, user);
     return user;
   }
@@ -86,7 +100,9 @@ export class MemStorage implements IStorage {
     return Array.from(this.opportunities.values());
   }
 
-  async createOpportunity(opportunity: Omit<Opportunity, "id" | "createdAt">): Promise<Opportunity> {
+  async createOpportunity(
+    opportunity: Omit<Opportunity, "id" | "createdAt">
+  ): Promise<Opportunity> {
     const id = this.currentOpportunityId++;
     const newOpportunity = {
       ...opportunity,

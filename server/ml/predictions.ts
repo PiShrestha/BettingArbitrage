@@ -53,7 +53,10 @@ export async function trainModel(
   const normalizedData = normalizeData(historicalOdds);
   const [X, y] = createSequences(normalizedData, lookback);
 
-  const xTensor = tf.tensor3d(X, [X.length, lookback, 1]);
+  const xTensor = tf.tensor3d(
+    X.map((sequence) => sequence.map((value) => [value])),
+    [X.length, lookback, 1]
+  );
   const yTensor = tf.tensor2d(y, [y.length, 1]);
 
   const model = await buildModel(lookback);

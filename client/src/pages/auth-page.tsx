@@ -10,6 +10,11 @@ import { insertUserSchema } from "@shared/schema";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLocation } from "wouter";
 import { Loader2 } from "lucide-react";
+import { z } from "zod";
+
+const loginSchema = insertUserSchema.pick({ username: true, password: true });
+type LoginFormValues = z.infer<typeof loginSchema>;
+type RegisterFormValues = z.infer<typeof insertUserSchema>;
 
 export default function AuthPage() {
   const { user, loginMutation, registerMutation } = useAuth();
@@ -64,13 +69,16 @@ export default function AuthPage() {
 
 function LoginForm() {
   const { loginMutation } = useAuth();
-  const form = useForm({
-    resolver: zodResolver(insertUserSchema.pick({ username: true, password: true })),
+  const form = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
   });
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit((data) => loginMutation.mutate(data))} className="space-y-4">
+      <form
+        onSubmit={form.handleSubmit((data) => loginMutation.mutate(data))}
+        className="space-y-4"
+      >
         <div>
           <Label htmlFor="username">Username</Label>
           <Input {...form.register("username")} />
@@ -79,8 +87,16 @@ function LoginForm() {
           <Label htmlFor="password">Password</Label>
           <Input type="password" {...form.register("password")} />
         </div>
-        <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
-          {loginMutation.isPending ? <Loader2 className="animate-spin" /> : "Login"}
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={loginMutation.isPending}
+        >
+          {loginMutation.isPending ? (
+            <Loader2 className="animate-spin" />
+          ) : (
+            "Login"
+          )}
         </Button>
       </form>
     </Form>
@@ -89,13 +105,16 @@ function LoginForm() {
 
 function RegisterForm() {
   const { registerMutation } = useAuth();
-  const form = useForm({
+  const form = useForm<RegisterFormValues>({
     resolver: zodResolver(insertUserSchema),
   });
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit((data) => registerMutation.mutate(data))} className="space-y-4">
+      <form
+        onSubmit={form.handleSubmit((data) => registerMutation.mutate(data))}
+        className="space-y-4"
+      >
         <div>
           <Label htmlFor="username">Username</Label>
           <Input {...form.register("username")} />
@@ -108,8 +127,16 @@ function RegisterForm() {
           <Label htmlFor="password">Password</Label>
           <Input type="password" {...form.register("password")} />
         </div>
-        <Button type="submit" className="w-full" disabled={registerMutation.isPending}>
-          {registerMutation.isPending ? <Loader2 className="animate-spin" /> : "Register"}
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={registerMutation.isPending}
+        >
+          {registerMutation.isPending ? (
+            <Loader2 className="animate-spin" />
+          ) : (
+            "Register"
+          )}
         </Button>
       </form>
     </Form>
