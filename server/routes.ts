@@ -19,6 +19,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(opportunities);
   });
 
+  app.get("/api/arbitrage/opportunities", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    const limit = Number.parseInt(String(req.query.limit ?? "100"), 10);
+    const opportunities = await storage.getArbitrageOpportunities();
+    res.json(
+      Number.isFinite(limit) && limit > 0
+        ? opportunities.slice(0, limit)
+        : opportunities
+    );
+  });
+
+  app.get("/api/arbitrage/history", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    const history = await storage.getArbitrageHistory();
+    res.json(history);
+  });
+
+  app.get("/api/markets", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    const limit = Number.parseInt(String(req.query.limit ?? "200"), 10);
+    const markets = await storage.getMarkets();
+    res.json(
+      Number.isFinite(limit) && limit > 0 ? markets.slice(0, limit) : markets
+    );
+  });
+
   // Get all betting sites
   app.get("/api/betting-sites", async (req, res) => {
     if (!req.isAuthenticated()) return res.sendStatus(401);

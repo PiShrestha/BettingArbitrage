@@ -20,6 +20,7 @@ export interface ProviderEndpoint {
   url: string;
   oddsFormat: OddsFormat;
   transform?: (payload: unknown) => ProviderOddsPayload;
+  fetcher?: () => Promise<unknown> | unknown;
 }
 
 export const providerOddsPayloadSchema = z.object({
@@ -68,14 +69,17 @@ export type ProviderOddsRunner = ProviderOddsMarket["runners"][number];
 export async function fetchProviderPayload(
   endpoint: ProviderEndpoint
 ): Promise<ProviderOddsPayload> {
-  const res = await fetch(endpoint.url);
-  if (!res.ok) {
-    throw new Error(
-      `Failed to fetch odds from ${endpoint.slug}: ${res.status}`
-    );
-  }
-
-  const raw = await res.json();
+  const raw = endpoint.fetcher
+    ? await endpoint.fetcher()
+    : await (async () => {
+        const res = await fetch(endpoint.url);
+        if (!res.ok) {
+          throw new Error(
+            `Failed to fetch odds from ${endpoint.slug}: ${res.status}`
+          );
+        }
+        return res.json();
+      })();
   const transformed = endpoint.transform ? endpoint.transform(raw) : raw;
   const parsed = providerOddsPayloadSchema.safeParse(transformed);
   if (!parsed.success) {

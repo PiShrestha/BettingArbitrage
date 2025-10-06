@@ -4,6 +4,8 @@ import {
   Opportunity,
   BettingSite,
   InsertBettingSite,
+  Market,
+  ArbitrageOpportunity,
 } from "@shared/schema";
 import session from "express-session";
 import createMemoryStore from "memorystore";
@@ -25,6 +27,17 @@ export interface IStorage {
     opportunity: Omit<Opportunity, "id" | "createdAt">
   ): Promise<Opportunity>;
 
+  // Market operations
+  upsertMarkets(markets: Market[]): Promise<Market[]>;
+  getMarkets(): Promise<Market[]>;
+
+  // Arbitrage operations
+  setArbitrageOpportunities(
+    opportunities: ArbitrageOpportunity[]
+  ): Promise<void>;
+  getArbitrageOpportunities(): Promise<ArbitrageOpportunity[]>;
+  getArbitrageHistory(): Promise<ArbitrageOpportunity[]>;
+
   // Session store
   sessionStore: session.Store;
 }
@@ -33,6 +46,11 @@ export class MemStorage implements IStorage {
   private users: Map<number, User>;
   private opportunities: Map<number, Opportunity>;
   private bettingSites: Map<number, BettingSite>;
+  private markets: Map<string, Market>;
+  private readonly marketRetention = 500;
+  private arbitrageLatest: Map<string, ArbitrageOpportunity>;
+  private arbitrageHistory: ArbitrageOpportunity[];
+  private readonly arbitrageHistoryLimit = 200;
   private currentUserId: number;
   private currentOpportunityId: number;
   private currentBettingSiteId: number;
@@ -42,6 +60,9 @@ export class MemStorage implements IStorage {
     this.users = new Map();
     this.opportunities = new Map();
     this.bettingSites = new Map();
+    this.markets = new Map();
+    this.arbitrageLatest = new Map();
+    this.arbitrageHistory = [];
     this.currentUserId = 1;
     this.currentOpportunityId = 1;
     this.currentBettingSiteId = 3; // Start from 3 since we have 2 initial sites
@@ -111,6 +132,64 @@ export class MemStorage implements IStorage {
     };
     this.opportunities.set(id, newOpportunity);
     return newOpportunity;
+  }
+
+  async upsertMarkets(markets: Market[]): Promise<Market[]> {
+    if (!markets.length) {
+      return this.getMarkets();
+    }
+
+    for (const market of markets) {
+      this.markets.set(market.id, market);
+    }
+
+    if (this.markets.size > this.marketRetention) {
+      const sorted = Array.from(this.markets.values()).sort(
+        (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)
+      );
+      const trimmed = sorted.slice(0, this.marketRetention);
+      this.markets = new Map(trimmed.map((market) => [market.id, market]));
+    }
+
+    return this.getMarkets();
+  }
+
+  async getMarkets(): Promise<Market[]> {
+    return Array.from(this.markets.values()).sort(
+      (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)
+    );
+  }
+
+  async setArbitrageOpportunities(
+    opportunities: ArbitrageOpportunity[]
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const updated = opportunities.map((opportunity) => ({
+      ...opportunity,
+      createdAt: opportunity.createdAt ?? now,
+    }));
+
+    this.arbitrageLatest = new Map(
+      updated.map((opportunity) => [
+        `${opportunity.eventId}:${opportunity.marketName}`,
+        opportunity,
+      ])
+    );
+
+    this.arbitrageHistory = [...updated, ...this.arbitrageHistory].slice(
+      0,
+      this.arbitrageHistoryLimit
+    );
+  }
+
+  async getArbitrageOpportunities(): Promise<ArbitrageOpportunity[]> {
+    return Array.from(this.arbitrageLatest.values()).sort(
+      (a, b) => b.guaranteedProfitFraction - a.guaranteedProfitFraction
+    );
+  }
+
+  async getArbitrageHistory(): Promise<ArbitrageOpportunity[]> {
+    return [...this.arbitrageHistory];
   }
 }
 
