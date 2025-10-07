@@ -4,6 +4,12 @@ import { setupAuth } from "./auth";
 import { storage } from "./storage";
 import { startScheduler } from "./scheduler";
 import { insertBettingSiteSchema } from "@shared/schema";
+import { simulateOpportunity } from "./analyticsClient";
+import { z } from "zod";
+import {
+  arbitrageOpportunitySchema,
+  simulationSummarySchema,
+} from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Setup authentication routes
@@ -43,6 +49,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(
       Number.isFinite(limit) && limit > 0 ? markets.slice(0, limit) : markets
     );
+  });
+
+  app.post("/api/arbitrage/simulate", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+
+    const payloadSchema = z.object({
+      opportunity: arbitrageOpportunitySchema,
+      trials: z.number().int().positive().optional(),
+      bankroll: z.number().positive().optional(),
+    });
+
+    const parsed = payloadSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json(parsed.error.flatten());
+    }
+
+    try {
+      const simulation = await simulateOpportunity(parsed.data);
+      simulationSummarySchema.parse(simulation);
+      res.json(simulation);
+    } catch (error) {
+      console.error("[routes] Simulation request failed", error);
+      res.status(502).json({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to execute simulation",
+      });
+    }
   });
 
   // Get all betting sites

@@ -112,6 +112,25 @@ export const arbitrageStakeSchema = z.object({
   payout: z.number().min(0),
 });
 
+export const arbitrageRiskMetricsSchema = z.object({
+  expectedValue: z.number(),
+  standardDeviation: z.number().min(0),
+  winProbability: z.number().min(0).max(1),
+  kellyFraction: z.number().optional(),
+  sharpeRatio: z.number().optional(),
+  valueAtRisk: z.number().optional(),
+  maxDrawdown: z.number().optional(),
+});
+
+export const simulationSummarySchema = z.object({
+  trials: z.number().int().positive(),
+  mean: z.number(),
+  stddev: z.number().min(0),
+  pPositive: z.number().min(0).max(1),
+  percentile5: z.number(),
+  percentile95: z.number(),
+});
+
 export const arbitrageOpportunitySchema = z.object({
   eventId: z.string(),
   eventName: z.string(),
@@ -123,6 +142,8 @@ export const arbitrageOpportunitySchema = z.object({
   bankroll: z.number(),
   stakes: z.array(arbitrageStakeSchema),
   createdAt: z.string(),
+  metrics: arbitrageRiskMetricsSchema.optional(),
+  simulation: simulationSummarySchema.optional(),
 });
 
 export type Provider = z.infer<typeof providerSchema>;
@@ -131,3 +152,5 @@ export type Market = z.infer<typeof marketSchema>;
 export type CanonicalEvent = z.infer<typeof canonicalEventSchema>;
 export type ArbitrageStake = z.infer<typeof arbitrageStakeSchema>;
 export type ArbitrageOpportunity = z.infer<typeof arbitrageOpportunitySchema>;
+export type ArbitrageRiskMetrics = z.infer<typeof arbitrageRiskMetricsSchema>;
+export type SimulationSummary = z.infer<typeof simulationSummarySchema>;

@@ -1,0 +1,10 @@
+# syntax=docker/dockerfile:1
+FROM node:20-alpine
+
+WORKDIR /usr/src/app
+COPY package*.json ./
+RUN npm install
+COPY . .
+ENV NODE_ENV=development
+ENV HOST=0.0.0.0
+CMD ["npm", "run", "dev"]

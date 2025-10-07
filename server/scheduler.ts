@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { ingestProvider } from "./workers/ingestOdds";
 import { detectArbitrageOpportunities } from "./workers/arbitrage";
 import { createFixtureEndpoints } from "./workers/fixtures/providerFixtures";
+import { analyzeMarkets } from "./analyticsClient";
 
 const providers = createFixtureEndpoints();
 
@@ -41,11 +42,24 @@ async function runPipeline(options: SchedulerOptions): Promise<void> {
   const markets = await ingestAllProviders();
   await storage.upsertMarkets(markets);
 
-  const opportunities = detectArbitrageOpportunities(markets, {
-    bankroll: options.bankroll,
-    minimumEdge: options.minimumEdge,
-    minimumProviders: 2,
-  });
+  let opportunities = [];
+
+  try {
+    opportunities = await analyzeMarkets(markets, {
+      bankroll: options.bankroll,
+      minimumEdge: options.minimumEdge,
+    });
+  } catch (error) {
+    console.error(
+      "[scheduler] Analytics service unavailable, falling back to local detection",
+      error
+    );
+    opportunities = detectArbitrageOpportunities(markets, {
+      bankroll: options.bankroll,
+      minimumEdge: options.minimumEdge,
+      minimumProviders: 2,
+    });
+  }
 
   await storage.setArbitrageOpportunities(opportunities);
 

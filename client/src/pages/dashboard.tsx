@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -13,12 +13,26 @@ import { Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { OddsHeatmap } from "@/components/OddsHeatmap";
 import { Layout } from "@/components/layout/Layout";
-import type { ArbitrageOpportunity, Market } from "@shared/schema";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import type {
+  ArbitrageOpportunity,
+  Market,
+  SimulationSummary,
+} from "@shared/schema";
 
 const OPPORTUNITIES_ENDPOINT = "/api/arbitrage/opportunities" as const;
 const MARKETS_ENDPOINT = "/api/markets" as const;
 
 export default function Dashboard() {
+  const { toast } = useToast();
+  const [simulationResults, setSimulationResults] = useState<
+    Record<string, SimulationSummary>
+  >({});
+  const [activeSimulationKey, setActiveSimulationKey] = useState<string | null>(
+    null
+  );
+
   const { data: opportunities, isLoading: loadingOpportunities } = useQuery<
     ArbitrageOpportunity[]
   >({
@@ -34,13 +48,85 @@ export default function Dashboard() {
   const stats = useMemo(() => {
     const opps = opportunities ?? [];
     const marketSnapshots = markets ?? [];
+    const withMetrics = opps.filter((opp) => Boolean(opp.metrics));
+    const averageExpectedValue = withMetrics.length
+      ? withMetrics.reduce(
+          (acc, opp) => acc + (opp.metrics?.expectedValue ?? 0),
+          0
+        ) / withMetrics.length
+      : 0;
+    const averageWinProbability = withMetrics.length
+      ? withMetrics.reduce(
+          (acc, opp) => acc + (opp.metrics?.winProbability ?? 0),
+          0
+        ) / withMetrics.length
+      : 0;
     return {
       totalOpportunities: opps.length,
       averageProfit: calculateAverageProfit(opps),
       bestProfit: findBestProfit(opps),
       marketCount: marketSnapshots.length,
+      averageExpectedValue,
+      averageWinProbability,
     };
   }, [opportunities, markets]);
+
+  const simulationMutation = useMutation({
+    mutationKey: ["simulate"],
+    mutationFn: async ({
+      opportunity,
+      trials,
+    }: {
+      opportunity: ArbitrageOpportunity;
+      trials?: number;
+    }) => {
+      const response = await fetch("/api/arbitrage/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          opportunity,
+          trials,
+          bankroll: opportunity.bankroll,
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Simulation request failed");
+      }
+
+      return (await response.json()) as SimulationSummary;
+    },
+    onSuccess: (data, variables) => {
+      const key = opportunityKey(variables.opportunity);
+      setSimulationResults((prev) => ({ ...prev, [key]: data }));
+      setActiveSimulationKey(null);
+      toast({
+        title: "Simulation complete",
+        description: `Mean profit $${data.mean.toFixed(2)} · P(>0) ${(
+          data.pPositive * 100
+        ).toFixed(1)}%`,
+      });
+    },
+    onError: (error: unknown) => {
+      setActiveSimulationKey(null);
+      toast({
+        title: "Simulation failed",
+        description:
+          error instanceof Error ? error.message : "Unable to run simulation",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const runSimulation = useCallback(
+    (opportunity: ArbitrageOpportunity) => {
+      const key = opportunityKey(opportunity);
+      setActiveSimulationKey(key);
+      simulationMutation.mutate({ opportunity, trials: 5000 });
+    },
+    [simulationMutation]
+  );
 
   if (isLoading) {
     return (
@@ -63,7 +149,7 @@ export default function Dashboard() {
           </p>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-4 mb-8">
+        <div className="grid gap-6 md:grid-cols-3 lg:grid-cols-6 mb-8">
           <StatsCard
             title="Total Opportunities"
             value={stats.totalOpportunities.toString()}
@@ -79,6 +165,14 @@ export default function Dashboard() {
           <StatsCard
             title="Markets Tracked"
             value={stats.marketCount.toString()}
+          />
+          <StatsCard
+            title="Avg Expected Value"
+            value={`$${stats.averageExpectedValue.toFixed(2)}`}
+          />
+          <StatsCard
+            title="Avg Win Probability"
+            value={`${(stats.averageWinProbability * 100).toFixed(1)}%`}
           />
         </div>
 
@@ -101,6 +195,8 @@ export default function Dashboard() {
                   <TableHead>Profit %</TableHead>
                   <TableHead>Sum Implied</TableHead>
                   <TableHead>Stakes</TableHead>
+                  <TableHead>Risk</TableHead>
+                  <TableHead>Simulation</TableHead>
                   <TableHead>Seen</TableHead>
                 </TableRow>
               </TableHeader>
@@ -131,6 +227,20 @@ export default function Dashboard() {
                     </TableCell>
                     <TableCell>
                       <StakeList stakes={opp.stakes} />
+                    </TableCell>
+                    <TableCell>
+                      <OpportunityMetrics metrics={opp.metrics} />
+                    </TableCell>
+                    <TableCell>
+                      <SimulationCell
+                        opportunity={opp}
+                        simulation={simulationResults[opportunityKey(opp)]}
+                        onSimulate={runSimulation}
+                        isLoading={
+                          activeSimulationKey === opportunityKey(opp) &&
+                          simulationMutation.isPending
+                        }
+                      />
                     </TableCell>
                     <TableCell>
                       <span className="text-xs text-muted-foreground">
@@ -174,6 +284,10 @@ function calculateAverageProfit(opportunities: ArbitrageOpportunity[]): number {
   return (sum / opportunities.length) * 100;
 }
 
+function opportunityKey(opportunity: ArbitrageOpportunity): string {
+  return `${opportunity.eventId}-${opportunity.marketName}`;
+}
+
 function findBestProfit(opportunities: ArbitrageOpportunity[]): number {
   if (opportunities.length === 0) return 0;
   return (
@@ -206,6 +320,114 @@ function StakeList({ stakes }: StakeListProps) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function OpportunityMetrics({
+  metrics,
+}: {
+  metrics?: ArbitrageOpportunity["metrics"];
+}) {
+  if (!metrics) {
+    return <p className="text-xs text-muted-foreground">Metrics unavailable</p>;
+  }
+
+  return (
+    <div className="space-y-1 text-xs">
+      <div className="flex items-center justify-between">
+        <span className="text-muted-foreground">EV</span>
+        <span className="font-medium">${metrics.expectedValue.toFixed(2)}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-muted-foreground">σ</span>
+        <span className="font-medium">
+          ${metrics.standardDeviation.toFixed(2)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-muted-foreground">P(Win)</span>
+        <span className="font-medium">
+          {(metrics.winProbability * 100).toFixed(1)}%
+        </span>
+      </div>
+      {metrics.kellyFraction !== undefined && (
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Kelly</span>
+          <span className="font-medium">
+            {(metrics.kellyFraction * 100).toFixed(1)}%
+          </span>
+        </div>
+      )}
+      {metrics.sharpeRatio !== undefined && (
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Sharpe</span>
+          <span className="font-medium">{metrics.sharpeRatio.toFixed(2)}</span>
+        </div>
+      )}
+      {metrics.valueAtRisk !== undefined && (
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">VaR95</span>
+          <span className="font-medium">${metrics.valueAtRisk.toFixed(2)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimulationCell({
+  opportunity,
+  simulation,
+  onSimulate,
+  isLoading,
+}: {
+  opportunity: ArbitrageOpportunity;
+  simulation?: SimulationSummary;
+  onSimulate: (opportunity: ArbitrageOpportunity) => void;
+  isLoading: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full"
+        onClick={() => onSimulate(opportunity)}
+        disabled={isLoading}
+      >
+        {isLoading ? (
+          <span className="flex items-center justify-center gap-2">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Running…
+          </span>
+        ) : (
+          "Simulate"
+        )}
+      </Button>
+      {simulation ? (
+        <div className="rounded-md border p-2 text-xs space-y-1">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Trials</span>
+            <span>{simulation.trials}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">μ</span>
+            <span>${simulation.mean.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">σ</span>
+            <span>${simulation.stddev.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">{"P(>0)"}</span>
+            <span>{(simulation.pPositive * 100).toFixed(1)}%</span>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Run Monte Carlo to view distribution
+        </p>
+      )}
     </div>
   );
 }

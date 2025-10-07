@@ -1,137 +1,162 @@
 # BettingArbitrage
 
-Full‑stack TypeScript monorepo for a betting odds aggregation + arbitrage insight platform.
+Full-stack arbitrage analytics sandbox that pairs a TypeScript ingestion/API layer with a Spring Boot risk microservice and a Spark backtester. The goal is to demonstrate a realistic multi-language architecture that can ingest odds ticks, surface risk-aware opportunities, and replay strategies against historical data — all while staying small enough to run locally.
 
-## Stack
+> ⚠️ **Disclaimer** — This codebase is for technical experimentation only. It does **not** place bets, integrate with bookmakers, or constitute financial advice. Use fictional data and comply with all local regulations.
 
-- Client: Vite + React + TypeScript + Tailwind + shadcn/ui components
-- Server: Node/Express (index.ts + routes.ts) + auth.ts + scheduler.ts (cron / polling) + storage.ts (likely persistence abstraction)
-- Shared: Zod or schema utilities in `shared/schema.ts` (cross client/server validation)
-- ML: Basic predictive logic under `server/ml/predictions.ts`
+## Architecture
+
+```
+┌─────────────────┐    ┌────────────────────────┐
+│ Providers /     │    │  Node / Express API    │
+│ Fixture feeds   │──▶ │  (ingest + scheduler)  │
+└─────────────────┘    │  • Normalise markets   │
+                       │  • Cache in Redis       │
+                       │  • Persist to Postgres  │
+                       └──────────┬─────────────┘
+                                  │ REST (JSON)
+                                  ▼
+                       ┌────────────────────────┐
+                       │ Spring Boot analytics  │
+                       │  /api/analyze          │
+                       │  /api/simulate         │
+                       │  • Risk metrics        │
+                       │  • Monte Carlo         │
+                       └──────────┬─────────────┘
+                                  │ Async job triggers
+                                  ▼
+                       ┌────────────────────────┐
+                       │ Spark backtester       │
+                       │  • Parquet snapshots   │
+                       │  • PnL curves          │
+                       │  • Sharpe / drawdown   │
+                       └────────────────────────┘
+
+React + Vite client consumes the Node APIs for live opportunities, runs ad-hoc simulations, and visualises heatmaps/backtests.
 
 ## Directory Layout
 
 ```
-client/      React front-end
-server/      API + schedulers + ML helpers
-shared/      Shared schema/types
+client/             React UI + dashboards
+server/             Node ingestion API + schedulers + ML helpers
+shared/             Zod schemas shared across TypeScript surfaces
+analytics-service/  Spring Boot microservice (risk + Monte Carlo)
+spark-backtester/    PySpark job for historical backtests
+docker-compose.yml   Local orchestration (Postgres, Redis, services)
+
 ```
 
-## Quick Start
+## Prerequisites
+
+- Node.js 20+
+- npm 10+
+- Java 17 + Maven (for the analytics service)
+- Python 3.10 + Apache Spark (optional, for the backtester)
+- Docker Desktop (optional but recommended for the composed stack)
+
+## Quick Start (local dev)
 
 ```bash
-# Install (root hoists deps if using single package.json)
+# Install TypeScript workspace deps
 npm install
 
-# Dev client (from root if scripts forwarded, else cd client)
-npm run dev      # or: cd client && npm run dev
+# Start the Spring analytics service
+cd analytics-service
+mvn spring-boot:run
 
-# Dev server (hot reload if script exists)
-npm run server   # or: cd server && npm run dev
+# In a new terminal – run the Node API + scheduler (serves client too)
+cd ..
+npm run dev
 
-# Type check
-npm run typecheck
-
-# Lint (add ESLint if missing)
-npm run lint
-
-# Tests (Vitest)
-npm run test
+# Visit the dashboard (after authenticating) at http://localhost:3000
 ```
 
-## Suggested npm Scripts (add to package.json if not present)
+### Docker Compose workflow
 
-```jsonc
-{
-  "scripts": {
-    "dev": "vite --config client/vite.config.ts",
-    "server": "ts-node --project tsconfig.json server/index.ts",
-    "build:client": "vite build --config client/vite.config.ts",
-    "build:server": "tsc -p tsconfig.json --outDir dist/server",
-    "build": "npm run build:client && npm run build:server",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint . --ext .ts,.tsx",
-    "format": "prettier -w ."
-  }
-}
+```bash
+docker compose up --build
 ```
 
-## Auth
+Services exposed:
 
-- `client/hooks/use-auth.tsx` + `server/auth.ts` should share validation contracts from `shared/schema.ts`.
+- `http://localhost:3000` — Node API + React client
+- `http://localhost:8081` — Spring analytics microservice (`/actuator/health` for probes)
+- `postgres://localhost:5432` — Postgres (dev credentials in compose file)
+- `redis://localhost:6379` — Redis cache
 
-## Scheduling
+> Compose mounts the repo into the Node container for live reload and builds the Spring Boot JAR via its Dockerfile.
 
-- `server/scheduler.ts`: ensures cron/poll intervals are configurable via env. Ingests fixture provider feeds via `ingestProvider`, persists normalized markets, and pushes arbitrage opportunities to `storage` every 15s by default.
-- Offline fixtures live under `server/workers/fixtures`. They generate realistic market snapshots on each scheduler tick so the arbitrage loop runs without external APIs. Replace with real endpoints by supplying `ProviderEndpoint` definitions.
+## Services
 
-## ML
+### Node ingestion + API (`server/`)
 
-- `server/ml/predictions.ts`: isolate pure functions; avoid side effects for testability.
-- `server/ml/features.ts` + `server/ml/train.ts`: feature engineering helpers and TensorFlow.js training pipeline. Standardization stats are persisted alongside the saved model.
+- `server/scheduler.ts` ingests fixture providers every 15 seconds, stores markets, and delegates to the analytics service for opportunity detection with risk metrics. A local TypeScript arbitrage detector is retained as a fallback when the microservice is unavailable.
+- REST endpoints under `/api/arbitrage/*` expose live opportunities, history, markets, and trigger extra Monte Carlo runs.
+- Shared contracts live in `shared/schema.ts` and include risk and simulation payloads consumed by both layers.
 
-## Environment Variables (create `.env`)
+### Spring Boot analytics microservice (`analytics-service/`)
+
+- `/api/analyze` accepts a market snapshot payload and returns arbitrage opportunities enriched with:
+  - Stake allocations per provider
+  - Expected value / standard deviation
+  - Kelly sizing suggestions
+  - Sharpe approximation, VaR, and baseline Monte Carlo summary
+- `/api/simulate` reruns Monte Carlo with custom trial counts to power on-demand simulations from the UI.
+- Actuator endpoints provide health/metrics for observability. Build with `mvn package` or run with `mvn spring-boot:run`.
+
+### Spark backtester (`spark-backtester/`)
+
+- `backtest.py` outlines a PySpark job that loads historical odds snapshots (Parquet), reconstructs best quotes per event, simulates bet execution, and writes both trade ledgers and summary metrics (mean return, volatility, win-rate).
+- Extend this job to compute CAGR, drawdowns, or to persist results back into Postgres for retrieval via `/api/backtest/{id}`.
+
+## Risk & Simulation Metrics
+
+Key analytics surfaced on each opportunity (see `shared/schema.ts`):
+
+- **Implied probability**: `1 / decimal_odds`
+- **Expected value**: `Σ(prob_i × payoff_i) − bankroll`
+- **Standard deviation**: Variance of outcome distribution
+- **Kelly fraction**: `(b·p − q) / b`, clipped to non-negative values
+- **Sharpe ratio**: `(mean_return − r_f) / stddev_return`, with a 1% annual risk-free default
+- **Value at Risk (95%)**: 5th percentile of simulated distribution
+- **Monte Carlo summary**: Trials, mean, σ, and probability of positive profit
+
+These metrics power the dashboard’s risk panel and simulation drawer.
+
+## Environment variables
+
+Create a root `.env` (or export env vars when using Docker):
 
 ```
 PORT=3000
 NODE_ENV=development
 JWT_SECRET=change_me
-DATABASE_URL=postgres://user:pass@host:5432/db   # if used
-REDIS_URL=redis://localhost:6379                 # if used
+ANALYTICS_URL=http://localhost:8081
+ANALYTICS_TIMEOUT_MS=8000
+DATABASE_URL=postgres://arbitrage:arbitrage@localhost:5432/arbitrage (optional persistence)
+REDIS_URL=redis://localhost:6379
 ```
 
-## Build & Deploy (example)
+## Testing & Quality Gates
 
-```bash
-# Production build
-npm run build
-# Serve client build via reverse proxy; run server:
-node dist/server/index.js
-```
+- **TypeScript layer**: `npm run test` (Vitest) exercises ingestion, arbitrage detection, and simulations.
+- **Spring microservice**: `mvn test` inside `analytics-service/` (add JUnit tests under `src/test/java`).
+- **Spark job**: Add PySpark unit tests around `backtest.py` transformations using small Parquet fixtures.
 
-## Testing (add)
+CI suggestion: lint → typecheck → Vitest → `mvn -pl analytics-service test` → package Docker images.
 
-- Vitest suite covers odds ingestion, arbitrage detection, and risk sims.
-  - `npm run test` runs the full suite once
-  - `npm run test:watch` keeps the runner live
-  - `npm run coverage` emits V8 coverage reports under `coverage/`
+## Monitoring & Ops
 
-## Quality Checklist
+- Spring Actuator (`/actuator/health`, `/actuator/metrics`) for probes.
+- Extend Node logs/metrics via Prometheus or OpenTelemetry if deploying beyond local dev.
+- `docker-compose.yml` is configured for quick local orchestration; for production, add TLS, secrets management, and persisted storage beyond the demo volumes.
 
-- [ ] Add ESLint + Prettier config
-- [ ] Enforce strict TypeScript (`"strict": true`)
-- [ ] Centralize API base URLs in one config
-- [ ] Wrap fetch/axios with retry + timeout
-- [ ] Input validation with shared schemas
-- [ ] Rate limiting / auth middleware on server
-- [ ] Graceful shutdown (SIGINT/SIGTERM) in `server/index.ts`
-- [ ] Avoid secrets in repo
-- [ ] Add health endpoint `/healthz`
-- [ ] Add Dockerfile (multi-stage) if containerizing
+## Security Notes
 
-## Possible Issues to Review Manually
-
-- Confirm imports in component library (no circular dependencies)
-- Ensure no direct browser-only APIs used server-side
-- Verify `shared/schema.ts` exports only serializable types
-- Check that `use-toast.ts` + `toaster.tsx` not duplicating context
-- Confirm `ml/predictions.ts` does not block event loop (offload heavy compute if needed)
-- Validate scheduler endpoints: `/api/arbitrage/opportunities`, `/api/arbitrage/history`, `/api/markets` return data under auth guard
-
-## Security / Hardening
-
-- Helmet middleware on Express
-- CORS restricted origins
-- JWT expiry + refresh strategy
-- Input sanitization (Zod + server validation)
-- Rate limit + request logging
-
-## Future Enhancements
-
-- Real-time updates via WebSocket/Subs
-- Feature flags
-- CI pipeline: lint + typecheck + unit tests gate
+- All credentials/secrets should be injected via environment variables or a secret manager.
+- Add rate limiting, CORS restrictions, input validation (already provided by Zod/Spring validators), and robust auth (see `server/auth.ts`).
+- The repo intentionally avoids real bookmaker integrations; keep it that way unless you have the legal right to access such feeds.
 
 ## License
 
-See `LICENSE`.
+MIT — see [`LICENSE`](./LICENSE).
