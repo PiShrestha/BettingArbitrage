@@ -100,6 +100,7 @@ function calculateStakes(
     return {
       runner: quote.market.runner.name,
       providerId: quote.provider.id,
+      providerName: quote.provider.name,
       odds: quote.odds,
       stakeFraction,
       stakeAmount,
@@ -135,6 +136,7 @@ export function detectArbitrageOpportunities(
     const sample = group[0];
     opportunities.push({
       eventId: sample.market.eventId,
+      eventName: sample.market.eventName,
       marketName: sample.market.marketName,
       sport: sample.market.sport,
       league: sample.market.league,

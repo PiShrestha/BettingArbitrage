@@ -105,6 +105,7 @@ export const canonicalEventSchema = z.object({
 export const arbitrageStakeSchema = z.object({
   runner: z.string(),
   providerId: z.string(),
+  providerName: z.string(),
   odds: z.number().positive(),
   stakeFraction: z.number().min(0),
   stakeAmount: z.number().min(0),
@@ -113,6 +114,7 @@ export const arbitrageStakeSchema = z.object({
 
 export const arbitrageOpportunitySchema = z.object({
   eventId: z.string(),
+  eventName: z.string(),
   marketName: z.string(),
   sport: z.string().optional(),
   league: z.string().optional(),
